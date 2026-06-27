@@ -26,8 +26,13 @@
 #include "command.h"
 //#include MARLIN_PATH(gcode/queue.h)
 //#include MARLIN_PATH(inc/Version.h)
+// Only undef DISABLED and _BV if they are defined (for compatibility with different Marlin versions)
+#ifdef DISABLED
 #undef DISABLED
+#endif
+#ifdef _BV
 #undef _BV
+#endif
 #include "wifiservices.h"
 #include "serial2socket.h"
 #include "command.h"

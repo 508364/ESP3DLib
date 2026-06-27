@@ -25,8 +25,24 @@
 #define MARLIN_HAL_PATH(PATH) HAL_PATH( ../../../../../Marlin/src/HAL, PATH)
 #define MARLIN_PATH(PATH) ESP_XSTR(../../../../../Marlin/src/PATH)
 #include MARLIN_PATH(inc/MarlinConfigPre.h)
+
+// Only undef DISABLED and _BV if they are defined (for compatibility with different Marlin versions)
+#ifdef DISABLED
 #undef DISABLED
+#endif
+#ifdef _BV
 #undef _BV
+#endif
+
+// Marlin version detection
+#if defined(CONFIGURATION_H_VERSION)
+  #if CONFIGURATION_H_VERSION >= 02010000
+    #define MARLIN_VERSION_21X
+  #else
+    #define MARLIN_VERSION_20X
+  #endif
+#endif
+
 //version
 #define LIB_VERSION "1.0.10"
 

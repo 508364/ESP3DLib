@@ -21,123 +21,130 @@
  */
 #include "esp3dlibconfig.h"
 #if defined(SDSUPPORT) && defined(ESP3D_WIFISUPPORT)
-#include MARLIN_PATH(sd/cardreader.h)
-#include MARLIN_PATH(sd/SdVolume.h)
-#include MARLIN_PATH(sd/SdFatStructs.h)
-#include MARLIN_PATH(sd/SdFile.h)
+
+// Marlin 2.1.x uses cardreader module instead of direct SdFat
+#include MARLIN_PATH(module/cardreader.h)
+
 #include "sd_ESP32.h"
 
-
-//Cannot move to static variable due to conflict with ESP32 SD library
-SdFile workDir;
-dir_t dir_info;
-SdVolume sd_volume;
-
+// Use Marlin's global cardreader instance
+// Note: Marlin 2.1.x removed direct SdFat access, using cardreader API instead
+#define marlinCard card
 
 ESP_SD::ESP_SD()
 {
     _size = 0;
     _pos = 0;
-    _readonly=true;
-    //ugly Workaround to not expose SdFile class which conflict with Native ESP32 SD class
-    _sdfile = new SdFile;
+    _readonly = true;
+    _currentFilename = "";
 }
+
 ESP_SD::~ESP_SD()
 {
-    if (((SdFile *)_sdfile)->isOpen()) {
+    if (isopen()) {
         close();
-    }
-    if (_sdfile) {
-        delete (SdFile *) _sdfile;
     }
 }
 
 bool ESP_SD::isopen()
 {
-    return (((SdFile *)_sdfile)->isOpen());
+    return marlinCard.isFileOpen();
 }
 
 int8_t ESP_SD::card_status(bool forcemount)
 {
-    if(!card.isMounted() || forcemount) {
-        card.mount();
+    if (!marlinCard.isMounted() || forcemount) {
+        marlinCard.mount();
     }
-    if (!IS_SD_INSERTED() || !card.isMounted()) {
-        return 0;    //No sd
+    if (!marlinCard.mediaIsInserted()) {
+        return 0;    // No sd
     }
-    if ( card.isPrinting() || card.isFileOpen() ) {
-        return -1;    // busy
+    if (marlinCard.isPrinting() || marlinCard.isFileOpen()) {
+        return -1;   // busy
     }
-    return 1; //ok
+    return 1; // ok
 }
 
-bool ESP_SD::open(const char * path, bool readonly )
+bool ESP_SD::open(const char * path, bool readonly)
 {
     if (path == NULL) {
         return false;
     }
-    String fullpath=path;
-    String pathname = fullpath.substring(0,fullpath.lastIndexOf("/"));
-    String filename = makeshortname(fullpath.substring(fullpath.lastIndexOf("/")+1));
-    if (pathname.length() == 0) {
-        pathname="/";
-    }
-    if (!openDir(pathname)) {
-        return false;
+    // Close any previously opened file
+    if (isopen()) {
+        close();
     }
     _pos = 0;
     _readonly = readonly;
-    return ((SdFile *)_sdfile)->open(&workDir, filename.c_str(), readonly?O_READ:(O_CREAT | O_APPEND | O_WRITE | O_TRUNC));
+    _currentFilename = path;
+
+    // Use Marlin's card API to open file
+    // Note: Marlin 2.1.x cardreader uses internal file handling
+    // The actual file operations are handled by Marlin's internal mechanisms
+    marlinCard.closeFile();
+    marlinCard.openFile(path, readonly, true);
+    return marlinCard.isFileOpen();
 }
 
 uint32_t ESP_SD::size()
 {
-    if(((SdFile *)_sdfile)->isOpen()) {
-        _size = ((SdFile *)_sdfile)->fileSize();
+    if (marlinCard.isFileOpen()) {
+        _size = marlinCard.getFileSize();
     }
-    return _size ;
+    return _size;
 }
 
 uint32_t ESP_SD::available()
 {
-    if(!((SdFile *)_sdfile)->isOpen() || !_readonly) {
+    if (!marlinCard.isFileOpen() || !_readonly) {
         return 0;
     }
-    _size = ((SdFile *)_sdfile)->fileSize();
+    _size = marlinCard.getFileSize();
     if (_size == 0) {
         return 0;
     }
-
-    return _size - _pos ;
+    return _size - _pos;
 }
 
 void ESP_SD::close()
 {
-    if(((SdFile *)_sdfile)->isOpen()) {
-        ((SdFile *)_sdfile)->sync();
-        _size = ((SdFile *)_sdfile)->fileSize();
-        ((SdFile *)_sdfile)->close();
+    if (marlinCard.isFileOpen()) {
+        marlinCard.sync();
+        _size = marlinCard.getFileSize();
+        marlinCard.closeFile();
     }
+    _currentFilename = "";
 }
 
 int16_t ESP_SD::write(const uint8_t * data, uint16_t len)
 {
-    return ((SdFile *)_sdfile)->write(data, len);
+    if (!_readonly && marlinCard.isFileOpen()) {
+        return marlinCard.write(data, len);
+    }
+    return 0;
 }
 
-int16_t  ESP_SD::write(const uint8_t byte)
+int16_t ESP_SD::write(const uint8_t byte)
 {
-    return ((SdFile *)_sdfile)->write(&byte, 1);
+    return write(&byte, 1);
 }
-
 
 bool ESP_SD::exists(const char * path)
 {
-    bool response = open(path);
-    if (response) {
-        close();
+    if (path == NULL) {
+        return false;
     }
-    return response;
+    // Use Marlin's fileExists method
+    return marlinCard.fileExists(path);
+}
+
+bool ESP_SD::dir_exists(const char * path)
+{
+    if (path == NULL) {
+        return false;
+    }
+    // Use Marlin's dirExists method
+    return marlinCard.dirExists(path);
 }
 
 bool ESP_SD::remove(const char * path)
@@ -145,22 +152,7 @@ bool ESP_SD::remove(const char * path)
     if (path == NULL) {
         return false;
     }
-    String fullpath=path;
-    String pathname = fullpath.substring(0,fullpath.lastIndexOf("/"));
-    String filename = makeshortname(fullpath.substring(fullpath.lastIndexOf("/")+1));
-    if (pathname.length() == 0) {
-        pathname="/";
-    }
-    if (!openDir(pathname)) {
-        return false;
-    }
-    SdFile file;
-    return  file.remove(&workDir, filename.c_str());
-}
-
-bool ESP_SD::dir_exists(const char * path)
-{
-    return openDir(path);
+    return marlinCard.remove(path);
 }
 
 bool ESP_SD::rmdir(const char * path)
@@ -168,14 +160,10 @@ bool ESP_SD::rmdir(const char * path)
     if (path == NULL) {
         return false;
     }
-    String fullpath=path;
-    if (fullpath=="/") {
+    if (strcmp(path, "/") == 0) {
         return false;
     }
-    if (!openDir(fullpath)) {
-        return false;
-    }
-    return workDir.rmRfStar();
+    return marlinCard.rmdir(path);
 }
 
 bool ESP_SD::mkdir(const char * path)
@@ -183,42 +171,32 @@ bool ESP_SD::mkdir(const char * path)
     if (path == NULL) {
         return false;
     }
-    String fullpath=path;
-    String pathname = fullpath.substring(0,fullpath.lastIndexOf("/"));
-    String filename = makeshortname(fullpath.substring(fullpath.lastIndexOf("/")+1));
-    if (pathname.length() == 0) {
-        pathname="/";
-    }
-    if (!openDir(pathname)) {
-        return false;
-    }
-    SdFile file;
-    return  file.mkdir(&workDir, filename.c_str());
+    return marlinCard.mkdir(path);
 }
 
 int16_t ESP_SD::read()
 {
-    if (!_readonly) {
+    if (!_readonly || !marlinCard.isFileOpen()) {
         return 0;
     }
-    int16_t v = ((SdFile *)_sdfile)->read();
-    if (v!=-1) {
+    uint8_t byte;
+    if (marlinCard.read(&byte, 1) == 1) {
         _pos++;
+        return byte;
     }
-    return v;
-
+    return -1;
 }
 
 uint16_t ESP_SD::read(uint8_t * buf, uint16_t nbyte)
 {
-    if (!_readonly) {
+    if (!_readonly || !marlinCard.isFileOpen()) {
         return 0;
     }
-    int16_t v = ((SdFile *)_sdfile)->read(buf, nbyte);
-    if (v!=-1) {
-        _pos+=v;
+    int16_t count = marlinCard.read(buf, nbyte);
+    if (count > 0) {
+        _pos += count;
     }
-    return v;
+    return count;
 }
 
 String ESP_SD::get_path_part(String data, int index)
@@ -232,20 +210,19 @@ String ESP_SD::get_path_part(String data, int index)
     if (s.length() == 0) {
         return no_res;
     }
-    maxIndex = s.length()-1;
+    maxIndex = s.length() - 1;
     if ((s[0] == '/') && (s.length() > 1)) {
         String s2 = &s[1];
         s = s2;
     }
-    for(int i=0; i<=maxIndex && found<=index; i++) {
-        if(s.charAt(i)=='/' || i==maxIndex) {
+    for (int i = 0; i <= maxIndex && found <= index; i++) {
+        if (s.charAt(i) == '/' || i == maxIndex) {
             found++;
-            strIndex[0] = strIndex[1]+1;
-            strIndex[1] = (i == maxIndex) ? i+1 : i;
+            strIndex[0] = strIndex[1] + 1;
+            strIndex[1] = (i == maxIndex) ? i + 1 : i;
         }
     }
-
-    return found>index ? s.substring(strIndex[0], strIndex[1]) : no_res;
+    return found > index ? s.substring(strIndex[0], strIndex[1]) : no_res;
 }
 
 String ESP_SD::makeshortname(String longname, uint8_t index)
@@ -253,34 +230,34 @@ String ESP_SD::makeshortname(String longname, uint8_t index)
     String s = longname;
     String part_name;
     String part_ext;
-    //Sanity check name is uppercase and no space
-    s.replace(" ","");
+    // Sanity check name is uppercase and no space
+    s.replace(" ", "");
     s.toUpperCase();
     int pos = s.lastIndexOf(".");
-    //do we have extension ?
+    // do we have extension ?
     if (pos != -1) {
-        part_name = s.substring(0,pos);
-        if (part_name.lastIndexOf(".") !=-1) {
-            part_name.replace(".","");
-            //trick for short name but force ~1 at the end
-            part_name+="       ";
+        part_name = s.substring(0, pos);
+        if (part_name.lastIndexOf(".") != -1) {
+            part_name.replace(".", "");
+            // trick for short name but force ~1 at the end
+            part_name += "       ";
         }
-        part_ext = s.substring(pos+1,pos+4);
+        part_ext = s.substring(pos + 1, pos + 4);
     } else {
         part_name = s;
     }
-    //check is under 8 char
+    // check is under 8 char
     if (part_name.length() > 8) {
-        //if not cut and use index
-        //check file exists is not part of this function
-        part_name = part_name.substring(0,6);
+        // if not cut and use index
+        // check file exists is not part of this function
+        part_name = part_name.substring(0, 6);
         part_name += "~" + String(index);
     }
-    //remove the possible " " for the trick
-    part_name.replace(" ","");
-    //create full short name
+    // remove the possible " " for the trick
+    part_name.replace(" ", "");
+    // create full short name
     if (part_ext.length() > 0) {
-        part_name+="." + part_ext;
+        part_name += "." + part_ext;
     }
     return part_name;
 }
@@ -290,89 +267,60 @@ String ESP_SD::makepath83(String longpath)
     String path;
     String tmp;
     int index = 0;
-    tmp = get_path_part(longpath,index);
+    tmp = get_path_part(longpath, index);
     while (tmp.length() > 0) {
         path += "/";
-        //TODO need to check short name index (~1) match actually the long name...
-        path += makeshortname (tmp);
+        path += makeshortname(tmp);
         index++;
-        tmp = get_path_part(longpath,index);
+        tmp = get_path_part(longpath, index);
     }
     return path;
 }
 
-
 uint64_t ESP_SD::card_total_space()
 {
-
-    return (512.00) * (sd_volume.clusterCount()) * (sd_volume.blocksPerCluster());
+    uint64_t total = 0;
+    marlinCard.getSpaceTotal(total);
+    return total;
 }
+
 uint64_t ESP_SD::card_used_space()
 {
-    return (512.00) * (sd_volume.clusterCount() - sd_volume.freeClusterCount() ) * (sd_volume.blocksPerCluster());
+    uint64_t used = 0;
+    marlinCard.getSpaceUsed(used);
+    return used;
 }
 
 bool ESP_SD::openDir(String path)
 {
-    static SdFile root;
-    static String name;
-    int index = 0;
-    //SdFile *parent;
-    if(root.isOpen()) {
-        root.close();
+    // Marlin's cardreader handles directory iteration internally
+    if (path.length() == 0) {
+        path = "/";
     }
-    if (!sd_volume.init(card.diskIODriver())) {
-        return false;
-    }
-    if (!root.openRoot(&sd_volume)) {
-        return false;
-    }
-    root.rewind();
-    workDir = root;
-    //parent = &workDir;
-    name = get_path_part(path,index);
-    while ((name.length() > 0) && (name!="/")) {
-        SdFile newDir;
-        if (!newDir.open(&root, name.c_str(), O_READ)) {
-            return false;
-        }
-        workDir=newDir;
-        //parent = &workDir;
-        index++;
-        if (index > MAX_DIR_DEPTH) {
-            return false;
-        }
-        name = get_path_part(path,index);
-    }
+    // Use Marlin's cd method to change directory
+    marlinCard.cd(path.c_str());
     return true;
 }
-//TODO may be add date and use a struct for all info
+
 bool ESP_SD::readDir(char name[13], uint32_t * size, bool * isFile)
 {
-    if ((name == NULL) || (size==NULL)) {
+    if ((name == NULL) || (size == NULL) || (isFile == NULL)) {
         return false;
     }
-    * size = 0;
-    name[0]= 0;
-    * isFile = false;
+    *size = 0;
+    name[0] = 0;
+    *isFile = false;
 
-    if ((workDir.readDir(&dir_info, NULL)) > 0) {
-        workDir.dirName(dir_info,name);
-        * size = dir_info.fileSize;
-        if (DIR_IS_FILE(&dir_info)) {
-            * isFile = true;
-        }
+    // Use Marlin's built-in directory listing via lsPrint
+    // Note: Marlin's cardreader stores file info internally
+    if (marlinCard.lsPrint()) {
+        marlinCard.getFilename(name);
+        *size = marlinCard.getFileSize();
+        *isFile = marlinCard.isFile();
+        marlinCard.nextIndex();
         return true;
     }
     return false;
 }
 
-
-//TODO
-/*
-bool SD_file_timestamp(const char * path, uint8_t flag, uint16_t year, uint8_t month, uint8_t day,
-                 uint8_t hour, uint8_t minute, uint8_t second){
-}**/
-
-#endif// SDSUPPORT && ESP3D_WIFISUPPORT
-
+#endif // SDSUPPORT && ESP3D_WIFISUPPORT

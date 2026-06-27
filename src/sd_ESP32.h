@@ -22,6 +22,9 @@
 
 #ifndef _ESP_SD_H_
 #define _ESP_SD_H_
+
+#include <Arduino.h>
+
 class ESP_SD
 {
 public:
@@ -30,7 +33,7 @@ public:
     int8_t card_status(bool forcemount = false);
     uint64_t card_total_space();
     uint64_t card_used_space();
-    bool open(const char * path, bool readonly = true );
+    bool open(const char * path, bool readonly = true);
     void close();
     int16_t write(const uint8_t * data, uint16_t len);
     int16_t write(const uint8_t byte);
@@ -50,11 +53,11 @@ public:
     bool readDir(char name[13], uint32_t * size, bool * isFile);
     bool * isFile;
 private:
-    void * _sdfile;
+    String _currentFilename;
     uint32_t _size;
     uint32_t _pos;
     bool _readonly;
     String get_path_part(String data, int index);
-
 };
+
 #endif

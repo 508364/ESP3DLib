@@ -21,8 +21,28 @@
 #include "esp3dlibconfig.h"
 
 #if defined(ESP3D_WIFISUPPORT)
-#include MARLIN_HAL_PATH(FlushableHardwareSerial.h)
-#include MARLIN_HAL_PATH(HAL.h)
+
+// Marlin 2.1.x compatibility: serial macros changed
+#ifdef MARLIN_VERSION_21X
+  // In 2.1.x, SERIAL_* macros were restructured and FlushableHardwareSerial may not exist
+  #ifndef SERIAL_ECHO
+    #define SERIAL_ECHO Serial
+  #endif
+  #ifndef SERIAL_ECHOLN
+    #define SERIAL_ECHOLN(x) Serial.println(x)
+  #endif
+  #define ESP_SERIAL_ECHO_START() SERIAL_ECHO.print("ESP:")
+  #define ESP_SERIAL_ECHOLNPAIR(prefix, value) do { SERIAL_ECHO.print(prefix); SERIAL_ECHO.println(value); } while(0)
+  #define ESP_SERIAL_ECHOPGM(x) SERIAL_ECHO.print(F(x))
+#else
+  // Marlin 2.0.x and earlier
+  #include MARLIN_HAL_PATH(FlushableHardwareSerial.h)
+  #include MARLIN_HAL_PATH(HAL.h)
+  #define ESP_SERIAL_ECHO_START() SERIAL_ECHO_START()
+  #define ESP_SERIAL_ECHOLNPAIR(prefix, value) SERIAL_ECHOLNPAIR(prefix, value)
+  #define ESP_SERIAL_ECHOPGM(x) SERIAL_ECHOPGM_P(x)
+#endif
+
 #if HAS_GRAPHICAL_LCD
 #include <U8glib.h>
 #endif
@@ -42,8 +62,8 @@
 #endif //HTTP_FEATURE
 void Esp3DCom::echo(const char * data)
 {
-    SERIAL_ECHO_START();
-    SERIAL_ECHOLNPAIR("", data);
+    ESP_SERIAL_ECHO_START();
+    ESP_SERIAL_ECHOLNPAIR("", data);
 #if HAS_DISPLAY
     if (strlen(data)) {
         ui.set_status(data);
@@ -104,7 +124,7 @@ void ESPResponseStream::print(const char *data)
     }
 #endif //HTTP_FEATURE
     if (_pipe == SERIAL_PIPE) {
-        SERIAL_ECHOPGM_P(data);
+        ESP_SERIAL_ECHOPGM(data);
     }
 }
 
